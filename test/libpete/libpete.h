@@ -2,7 +2,7 @@
  * libpete.h
  *
  *  Created on: Mar 3, 2015
- *      Author: root
+ *      Author: JiangYizuo
  */
 
 #ifndef LIB_PETE_H_

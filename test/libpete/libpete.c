@@ -2,7 +2,7 @@
  * libpete.c
  *
  *  Created on: Mar 3, 2015
- *      Author: root
+ *      Author: JiangYizuo
  */
 #include "libpete.h"
 
