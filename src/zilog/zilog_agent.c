@@ -23,6 +23,7 @@ static int read_content_in_block(zilog_buf_t *lbuf, zilog_block_header_t* block,
     /*Wait for completed contents, lock indicates some contents are not completely written yet.*/
     while(block->lock > 0)
         syscall(SYS_sched_yield);
+
     while(read_window_size){
         zilog_content_header_t *content_header = (zilog_content_header_t*)(lbuf->buf + ZILOG_BOUNDED_OFFSET(read_offset));
         uint8_t* buf;
@@ -36,7 +37,9 @@ static int read_content_in_block(zilog_buf_t *lbuf, zilog_block_header_t* block,
         args->gp_offset = content_header->gp_off;
         args->reg_save_area = buf - content_header->gp_off;
         args->overflow_arg_area = buf + content_header->reg_size;
+        /*Just verify if the content is malformed.*/
         vsnprintf(fbuf, 10240, ((zilog_unit_t*)content_header->lunit)->format_str, args);
+        //printf("%s", fbuf);
         //syslog(LOG_INFO, "%s", fbuf);
     }
     va_end(args);
@@ -58,20 +61,27 @@ static int read_content_from_log_buffer(zilog_buf_t *lbuf)
             syscall(SYS_sched_yield);
             continue;
         }
+        if(ZILOG_THREAD_BUFFER_BLOCK_SIZE == ZILOG_BLOCK_OFFSET(read_offset)){
+            read_offset += sizeof(zilog_block_header_t);
+        }
 
         /*Calculate read window*/
         while(ZILOG_SEQUENCE_NUM(write_offset) > ZILOG_SEQUENCE_NUM(read_offset)){
-
+            //printf("case1 block off: %ld\n", ZILOG_BLOCK_OFFSET(read_offset));
             read_window_size = ZILOG_THREAD_BUFFER_BLOCK_SIZE - ZILOG_BLOCK_OFFSET(read_offset);
             read_cursor = (zilog_block_header_t*)(lbuf->buf + ZILOG_CAST_OFFSET(read_offset));
             read_content_in_block(lbuf, read_cursor, read_offset, read_window_size);
             read_offset += read_window_size;
+            assert(ZILOG_BLOCK_OFFSET(read_offset) == ZILOG_THREAD_BUFFER_BLOCK_SIZE);
             read_offset += sizeof(zilog_block_header_t);
         }
 
-        if(ZILOG_SEQUENCE_NUM(write_offset) == ZILOG_SEQUENCE_NUM(read_offset))
+        //if(ZILOG_SEQUENCE_NUM(write_offset) == ZILOG_SEQUENCE_NUM(read_offset))
+
+        if(write_offset > read_offset)
         {
             read_window_size = write_offset - read_offset;
+            //printf("case2 block off: %ld read_window_size %ld\n", ZILOG_BLOCK_OFFSET(read_offset), read_window_size);
             read_cursor = (zilog_block_header_t*)(lbuf->buf + ZILOG_CAST_OFFSET(read_offset));
             read_content_in_block(lbuf, read_cursor, read_offset, read_window_size);
             read_offset += read_window_size;

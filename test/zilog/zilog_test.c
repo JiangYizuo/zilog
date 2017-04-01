@@ -88,7 +88,7 @@ void* loop_logging(void* arg){
     }
     return NULL;
 }
-#define THREAD_NUM 1
+#define THREAD_NUM 8
 
 #include <pthread.h>
 int main(int argc, char* argv[])

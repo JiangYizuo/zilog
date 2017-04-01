@@ -50,9 +50,6 @@ static void initialize_thread_buffers() {
     lbuf.size = ZILOG_THREAD_BUFFER_SIZE;
     lbuf.buf = (uint8_t*) malloc(
             sizeof(uint8_t) * lbuf.size);
-    lbuf.read_block_cnt = 0;
-    lbuf.read_offset = 0;
-    lbuf.read_block_index = 0;
     lbuf.write_offset = sizeof(zilog_block_header_t);
     lbuf.read_offset = sizeof(zilog_block_header_t);
     for (i = 0; i < ZILOG_THREAD_BUFFER_BLOCK_NUM; i++) {
@@ -371,6 +368,7 @@ static size_t write_args(uint8_t* buf, va_list_inf_t* va_list_inf,
 
 #define ZILOG_LOCK_BLOCK(__block_lock) __sync_fetch_and_add(__block_lock, 2)
 #define ZILOG_UNLOCK_BLOCK(__block_lock) __sync_fetch_and_add(__block_lock, -2)
+
 static uint8_t* start_with_new_block(
         volatile size_t** lock,
         zilog_buf_t* lbuf,
@@ -385,11 +383,16 @@ static uint8_t* start_with_new_block(
     assert(ZILOG_BLOCK_OFFSET(write_offset_updated) == ZILOG_THREAD_BUFFER_BLOCK_SIZE);
     block_header = (zilog_block_header_t*)(lbuf->buf + ZILOG_BOUNDED_OFFSET(write_offset_updated));
     /*SynchronizationcPoint 1: Wait here until all content has been completely written into this block.*/
-    while(block_header->lock)
-        syscall(SYS_sched_yield);
+
     write_offset_updated += sizeof(zilog_block_header_t);
+
     buf = lbuf->buf + ZILOG_BOUNDED_OFFSET(write_offset_updated);
     write_offset_updated = write_offset_updated + required_space_size;
+    /*while(write_offset_updated - lbuf->read_offset > ZILOG_MAX_BUFFER_WR_GAP){
+        syscall(SYS_sched_yield);
+    }*/
+    while(block_header->lock)
+        syscall(SYS_sched_yield);
     ZILOG_LOCK_BLOCK(&block_header->lock);
     /*To do, ABA problem impact analyze ?*/
     if(__sync_bool_compare_and_swap(&lbuf->write_offset, write_offset, write_offset_updated)){
@@ -423,23 +426,18 @@ static uint8_t* get_space_from_log_buffer(volatile size_t** lock,
         return NULL;
     do{
         size_t write_offset;
+        size_t read_offset;
         size_t write_secquence_unm_expected;
         zilog_block_header_t* block_header;
         write_offset = log_buf->write_offset;
+        read_offset = log_buf->read_offset;
+        //assert(write_offset - read_offset <= ZILOG_THREAD_BUFFER_SIZE);
         block_offset =
                 ZILOG_BLOCK_OFFSET(write_offset);
         free_space_size =
                 ZILOG_THREAD_BUFFER_BLOCK_SIZE - block_offset;
 
-        if( required_space_size + write_offset - log_buf->read_offset > ZILOG_THREAD_BUFFER_SIZE ){
-            /*Issue 1, to do, important log (ERROR, WARNING) should be kept and drops non-important (INFO,DEBUG) logs.*/
-            /*Memory is full and do not write any log, just return. This drops new logs to write.*/
-            return NULL;
-            /*Wait log agent to read old logs, this keeps all logs but whole process waits log to output.*/
-            syscall(SYS_sched_yield);
-            continue;
-        }
-
+        //printf("%ld, %ld , %ld, %ld\n", required_space_size, write_offset, log_buf->read_offset, required_space_size + write_offset - log_buf->read_offset);
         /*-1 is to handle a boundary case that free_space_size is 0.*/
         write_secquence_unm_expected = ZILOG_SEQUENCE_NUM(write_offset - 1);
         block_header = (zilog_block_header_t*)(log_buf->buf + ZILOG_CAST_OFFSET(write_offset));
@@ -452,11 +450,17 @@ static uint8_t* get_space_from_log_buffer(volatile size_t** lock,
         }
 
         if (required_space_size > free_space_size) {
+            while(write_offset + free_space_size + sizeof(zilog_block_header_t) + required_space_size
+                    - log_buf->read_offset > ZILOG_MAX_BUFFER_WR_GAP){
+                return NULL;
+                syscall(SYS_sched_yield);
+            }
             if(free_space_size >= sizeof(zilog_content_header_t))
                 /*Need to set a ending flag in the last content header, so the block must be locked to notify reader the content is not ready yet.*/
                 ZILOG_LOCK_BLOCK(&block_header->lock);
             buf = start_with_new_block(lock, log_buf, required_space_size, free_space_size, write_offset);
             if(buf){
+                //assert(log_buf->write_offset - log_buf->read_offset <= ZILOG_MAX_BUFFER_WR_GAP);
                 if(free_space_size >= sizeof(zilog_content_header_t)){
                     zilog_content_header_t* content_header =
                             (zilog_content_header_t*)(log_buf->buf + ZILOG_BOUNDED_OFFSET(write_offset));
@@ -476,6 +480,15 @@ static uint8_t* get_space_from_log_buffer(volatile size_t** lock,
             size_t write_offset_updated;
             buf = log_buf->buf + ZILOG_BOUNDED_OFFSET(write_offset);
             write_offset_updated = write_offset + required_space_size;
+            //assert(write_offset - read_offset <= ZILOG_MAX_BUFFER_WR_GAP);
+            if(write_offset_updated - read_offset > ZILOG_MAX_BUFFER_WR_GAP){
+                /*Issue 1, to do, important log (ERROR, WARNING) should be kept and drops non-important (INFO,DEBUG) logs.*/
+                /*Memory is full and do not write any log, just return. This drops new logs to write.*/
+                return NULL;
+                /*Wait log agent to read old logs, this keeps all logs but whole process waits free space after some logs are read.*/
+                syscall(SYS_sched_yield);
+                continue;
+            }
             ZILOG_LOCK_BLOCK(&block_header->lock);
             if(__sync_bool_compare_and_swap(&log_buf->write_offset, write_offset, write_offset_updated)){
                 *lock = &block_header->lock;
@@ -487,6 +500,7 @@ static uint8_t* get_space_from_log_buffer(volatile size_t** lock,
                 continue;
             }
         }
+
     }while(1);
 
     return NULL;
