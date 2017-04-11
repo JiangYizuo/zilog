@@ -19,7 +19,7 @@ extern "C" {
 #define ZILOG_MAX_ARG_NUM 32
 #define ZILOG_MAX_SESSION_NUM 1024
 #define ZILOG_MAX_DEBUG_LEVEL 8
-#define ZILOG_DEFAULT_DEBUG_LEVEL 1
+#define ZILOG_DEFAULT_DEBUG_LEVEL 128
 #define ZILOG_INVALID_UNIT_ID 0xffffffff
 #define ZILOG_CONF_COMPLEX_TYPES 1
 
@@ -41,6 +41,16 @@ typedef enum {
 #endif
 }zilog_argtype_t;
 
+typedef enum {
+    ZILOG_PRIORITY_FATAL = 0,
+    ZILOG_PRIORITY_ERROR,
+    ZILOG_PRIORITY_WARN,
+    ZILOG_PRIORITY_INFO,
+    ZILOG_PRIORITY_DEBUG,
+    ZILOG_PRIORITY_ALL,
+    ZILOG_PRIORITY_TOTAL /*Just a number of priorities.*/
+}zilog_priority_t;
+
 typedef struct{
     /*format_str must be the first member.*/
     const char* format_str;
@@ -48,6 +58,7 @@ typedef struct{
     const char* fun;
     int line;
     uint16_t arg_total_size;
+    uint16_t arg_packed_size;
     uint8_t n_arg;
     uint8_t n_str;
 #ifdef __x86_64__
@@ -74,10 +85,11 @@ typedef struct{
 extern int zilog_debugLevels[ZILOG_MAX_SESSION_NUM];
 void initialize_zilog_unit(zilog_unit_t* lunit, const char* file, const char* fun, int line, const char* fmt, ...);
 int zilog_write_arguments(
+        zilog_priority_t priority,
 		zilog_unit_t* lunit,
 		const char* fmt,
 		...
-		)__attribute__((format(printf,2,3)));
+		)__attribute__((format(printf,3,4)));
 
 
 #define do_debug(__SECTION, __LEVEL) \
@@ -91,13 +103,15 @@ int zilog_write_arguments(
         zilog_write_arguments(&lunit, __VA_ARGS__);\
     }while(0)
 
-#define HP_LOGGING(__SESSION, __LEVEL, ...) \
+#define ZILOG(__SESSION, __LEVEL, ...) \
     do{ \
         static zilog_unit_t lunit = {NULL}; \
-        if(lunit.format_str == NULL) \
+        if(lunit.format_str == NULL) {\
             initialize_zilog_unit(&lunit, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__); \
-        if(do_debug(__SESSION, __LEVEL)) \
-		zilog_write_arguments(&lunit, __VA_ARGS__);\
+        }\
+        if(do_debug(__SESSION, __LEVEL)){ \
+            zilog_write_arguments(__LEVEL, &lunit, __VA_ARGS__);\
+        }\
     }while(0)
 
 #ifdef __cplusplus

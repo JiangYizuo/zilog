@@ -15,15 +15,18 @@
 #include <syslog.h>
 #include "zilog_agent.h"
 
+
+
+
 static int read_content_in_block(zilog_buf_t *lbuf, zilog_block_header_t* block, size_t read_offset, size_t read_window_size, ...)
 {
     va_list args;
     va_start(args, read_window_size);
+
     char fbuf[10240];
     /*Wait for completed contents, lock indicates some contents are not completely written yet.*/
-    while(block->lock > 0)
-        syscall(SYS_sched_yield);
-
+    SLEEP_TO_WAIT(block->lock > 0);
+#if 0
     while(read_window_size){
         zilog_content_header_t *content_header = (zilog_content_header_t*)(lbuf->buf + ZILOG_BOUNDED_OFFSET(read_offset));
         uint8_t* buf;
@@ -39,9 +42,11 @@ static int read_content_in_block(zilog_buf_t *lbuf, zilog_block_header_t* block,
         args->overflow_arg_area = buf + content_header->reg_size;
         /*Just verify if the content is malformed.*/
         vsnprintf(fbuf, 10240, ((zilog_unit_t*)content_header->lunit)->format_str, args);
+        //usleep(100);
         //printf("%s", fbuf);
         //syslog(LOG_INFO, "%s", fbuf);
     }
+#endif
     va_end(args);
     return 0;
 }
@@ -53,14 +58,8 @@ static int read_content_from_log_buffer(zilog_buf_t *lbuf)
     zilog_block_header_t* read_cursor = (zilog_block_header_t*)lbuf->buf;
     while(1){
         size_t read_window_size;
-        write_offset = lbuf->write_offset;
-        read_offset = lbuf->read_offset;
-        assert(write_offset >= read_offset);
-        if(write_offset == read_offset){
-            /*No content to read, continue trying. To do: use conditional wait method, loops here cost CPU time much!*/
-            syscall(SYS_sched_yield);
-            continue;
-        }
+        /*No content to read, continue trying. To do: use conditional wait method, loops here cost CPU time much!*/
+        SLEEP_TO_WAIT_WITH_EXPRESSION(write_offset <= read_offset, write_offset = lbuf->write_offset, read_offset = lbuf->read_offset);
         if(ZILOG_THREAD_BUFFER_BLOCK_SIZE == ZILOG_BLOCK_OFFSET(read_offset)){
             read_offset += sizeof(zilog_block_header_t);
         }

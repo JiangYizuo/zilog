@@ -39,6 +39,7 @@ typedef struct{
     uint16_t overflow_size;
     uint16_t string_off[ZILOG_MAX_ARG_NUM];
     uint16_t size;
+    uint16_t packed_size;
 #endif
     uint16_t string_len[ZILOG_MAX_ARG_NUM];
     const char* string[ZILOG_MAX_ARG_NUM];
@@ -242,12 +243,19 @@ static size_t calculate_required_sapce(
         va_list_inf_t* va_list_inf,
         zilog_unit_t* lunit, va_list args){
     size_t req_size;
+    uint16_t str_size = 0;
+    size_t packed_size;
     req_size = calculate_arg_list_size_x86_64(va_list_inf, lunit, args);
-    if(lunit->n_str > 0)
-        req_size += calculate_arg_list_string_offset_x86_64(va_list_inf, lunit, args);
+    if(lunit->n_str > 0){
+        str_size = calculate_arg_list_string_offset_x86_64(va_list_inf, lunit, args);
+        req_size += str_size;
+    }
     req_size += sizeof(zilog_content_header_t);
     req_size = ZILOG_ALIGN(req_size, sizeof(size_t));
     va_list_inf->size = req_size;
+    packed_size = lunit->arg_packed_size + str_size;
+    packed_size = ZILOG_ALIGN(packed_size, sizeof(size_t));
+    va_list_inf->packed_size = packed_size + sizeof(zilog_content_header_t);
     return req_size;
 }
 
@@ -255,9 +263,11 @@ static size_t write_args(zilog_content_header_t* content_header, uint8_t* buf, v
         zilog_unit_t* lunit, va_list args) {
 
     size_t offset;
+#if !ZILOG_CONFIG_PACKED
     content_header->gp_off = va_list_inf->gp_off;
     content_header->gp_size = va_list_inf->gp_size;
     content_header->reg_size = va_list_inf->reg_size;
+#endif
     content_header->size = va_list_inf->size;
     content_header->lunit = lunit;
     //content_header->__jiffies = *jiffies;
@@ -287,33 +297,87 @@ static size_t write_args(zilog_content_header_t* content_header, uint8_t* buf, v
         }
     }
     assert(va_list_inf->size == ZILOG_ALIGN(sizeof(zilog_content_header_t) + offset, sizeof(size_t)));
-    if(0)
-    {
-        static size_t logcnt = 0;
-        static size_t logvolume = 0;
-        static size_t strvolume = 0;
-        char testingstr[10240];
-        char productstr[10240];
-        vsnprintf(testingstr, 10240, lunit->format_str, args);
-        args->fp_offset = va_list_inf->gp_size + va_list_inf->gp_off;
-        args->gp_offset = va_list_inf->gp_off;
-        args->reg_save_area = buf - va_list_inf->gp_off;
-        args->overflow_arg_area = buf + va_list_inf->reg_size;
-        vsnprintf(productstr, 10240, lunit->format_str, args);
-        if(strcmp(testingstr, productstr)){
-            size_t block_offset = ZILOG_BLOCK_OFFSET(buf - lbuf.buf);
-            size_t free_space = ZILOG_THREAD_BUFFER_BLOCK_SIZE - block_offset;
-            printf("ERROR!\n%s\n%s\n\nblock_offset: %ld, free_space: %ld, required_size: %ld\n", testingstr, productstr, block_offset, free_space,
-                    va_list_inf->size - sizeof(zilog_content_header_t));
-            //assert( ZILOG_THREAD_BUFFER_BLOCK_SIZE - ZILOG_BLOCK_OFFSET(buf - lbuf.buf) >=  va_list_inf.size);
-        }
-        __sync_fetch_and_add(&logcnt, 1);
-        __sync_fetch_and_add(&logvolume, offset);
-        __sync_fetch_and_add(&strvolume, strlen(testingstr));
-        //printf("number of logs: %d, total volume: row %d, text %d\n", logcnt, logvolume, strvolume);
-    }
     return offset;
 }
+
+static size_t write_args_packed(zilog_content_header_t* content_header, uint8_t* buf, va_list_inf_t* va_list_inf,
+        zilog_unit_t* lunit, va_list args) {
+
+    size_t offset = 0;
+
+#define ZILOG_WRITE_ARG(__typed, __types) \
+    do{\
+        __typed argd = (__typed)va_arg(args, __types);\
+        /*offset = ZILOG_ALIGN(offset, sizeof(__typed));*/ \
+        /**(__typed*)(buf + offset) = (__typed)va_arg(args, __types);*/ \
+        memcpy(buf + offset, &argd, sizeof(__typed));\
+        offset += sizeof(__typed); \
+    }while(0)
+
+    size_t total_size = lunit->arg_packed_size;
+    int i;
+    uint16_t strcnt = 0;
+    content_header->size = va_list_inf->packed_size;
+    content_header->lunit = lunit;
+
+    for (i = 0; i < lunit->n_arg; i++) {
+        switch (lunit->arg_type[i]) {
+        case ZILOG_INT:
+            ZILOG_WRITE_ARG(int, int);
+            ZILOG_INTERNAL_DEBUG("%d\t", *(int*)(buf + offset - sizeof(int)));
+            break;
+        case ZILOG_LONG:
+            ZILOG_WRITE_ARG(long, long);
+            ZILOG_INTERNAL_DEBUG("%ld\t", *(long*)(buf + offset - sizeof(long)));
+            break;
+#ifndef __x86_64__
+        case ZILOG_LONG_LONG:
+            ZILOG_WRITE_ARG(long long, long long);
+            ZILOG_INTERNAL_DEBUG("%ld\t", *(long long*)(buf + offset - sizeof(long long)));
+            break;
+#endif
+        case ZILOG_SHORT:
+            ZILOG_WRITE_ARG(short, int);
+            ZILOG_INTERNAL_DEBUG("%hd\t", *(short*)(buf + offset - sizeof(short)));
+            break;
+        case ZILOG_CHAR:
+            ZILOG_WRITE_ARG(char, int);
+            ZILOG_INTERNAL_DEBUG("%d\t", *(char*)(buf + offset - sizeof(char)));
+            break;
+        case ZILOG_FLOAT:
+            ZILOG_WRITE_ARG(float, double);
+            ZILOG_INTERNAL_DEBUG("%f\t", *(float*)(buf + offset - sizeof(float)));
+            break;
+        case ZILOG_DOUBLE:
+            ZILOG_WRITE_ARG(double, double);
+            ZILOG_INTERNAL_DEBUG("%f\t", *(double*)(buf + offset - sizeof(double)));
+            break;
+        case ZILOG_STRING:
+            {
+                const char* str = va_arg(args, const char*);
+                size_t str_len = va_list_inf->string_len[strcnt++];
+                ZILOG_INTERNAL_DEBUG("%s\t", str);
+                memcpy(buf + total_size, str, str_len);
+                total_size += str_len;
+            }
+            break;
+        case ZILOG_POINTER:
+            ZILOG_WRITE_ARG(void*, void*);
+            break;
+ //       case ZILOG_WCHAR:
+ //           ZILOG_WRITE_ARG(wchar_t, int);
+ //           break;
+        default:
+            ;
+        }
+    }
+
+    assert(ZILOG_ALIGN(total_size, sizeof(size_t)) == va_list_inf->packed_size - sizeof(zilog_content_header_t));
+    return total_size;
+#undef ZILOG_WRITE_ARG
+}
+
+
 #else
 
 static size_t calculate_required_sapce(
@@ -382,7 +446,7 @@ static uint8_t* start_with_new_block(
     write_offset_updated = write_offset + free_space_size;
     assert(ZILOG_BLOCK_OFFSET(write_offset_updated) == ZILOG_THREAD_BUFFER_BLOCK_SIZE);
     block_header = (zilog_block_header_t*)(lbuf->buf + ZILOG_BOUNDED_OFFSET(write_offset_updated));
-    /*SynchronizationcPoint 1: Wait here until all content has been completely written into this block.*/
+
 
     write_offset_updated += sizeof(zilog_block_header_t);
 
@@ -398,8 +462,6 @@ static uint8_t* start_with_new_block(
     if(__sync_bool_compare_and_swap(&lbuf->write_offset, write_offset, write_offset_updated)){
         //assert(block_header->write_sequence_num == ZILOG_SEQUENCE_NUM(write_offset_updated) - ZILOG_THREAD_BUFFER_BLOCK_NUM);
         block_header->write_sequence_num = ZILOG_SEQUENCE_NUM(write_offset_updated);
-        if((block_header->write_sequence_num & 0xfff) == 0)
-            printf("%p block_header->write_sequence_num = %ld free_space_size = %ld\n", block_header, block_header->write_sequence_num, free_space_size);
         *lock = &block_header->lock;
         return buf;
     }
@@ -409,7 +471,7 @@ static uint8_t* start_with_new_block(
     }
 }
 
-static uint8_t* get_space_from_log_buffer(volatile size_t** lock,
+static uint8_t* get_space_from_log_buffer(zilog_priority_t priority, volatile size_t** lock,
         va_list_inf_t* va_list_inf,
         zilog_unit_t* lunit, va_list args, zilog_buf_t* log_buf) {
     uint8_t* buf;
@@ -420,17 +482,26 @@ static uint8_t* get_space_from_log_buffer(volatile size_t** lock,
             calculate_required_sapce(
                     va_list_inf,
                     lunit, args);
-
+#if ZILOG_CONFIG_PACKED
+    required_space_size = va_list_inf->packed_size;
+#endif
     if(required_space_size > ZILOG_THREAD_BUFFER_BLOCK_LOAD_SIZE)
         /*Unable to allocate space due to a huge size required.*/
         return NULL;
     do{
         size_t write_offset;
-        size_t read_offset;
         size_t write_secquence_unm_expected;
         zilog_block_header_t* block_header;
+        static const size_t drop_threshold_map[] = {
+            0, /*never drop*/
+            0, /*never drop*/
+            0, /*never drop*/
+            ZILOG_MAX_BUFFER_WR_GAP, /*drop when buffer is full*/
+            ZILOG_MAX_BUFFER_WR_GAP - ZILOG_THREAD_BUFFER_BLOCK_SIZE * 8,
+            ZILOG_MAX_BUFFER_WR_GAP - ZILOG_THREAD_BUFFER_BLOCK_SIZE * 16,
+        };
+        size_t drop_threshold = drop_threshold_map[priority];
         write_offset = log_buf->write_offset;
-        read_offset = log_buf->read_offset;
         //assert(write_offset - read_offset <= ZILOG_THREAD_BUFFER_SIZE);
         block_offset =
                 ZILOG_BLOCK_OFFSET(write_offset);
@@ -443,6 +514,7 @@ static uint8_t* get_space_from_log_buffer(volatile size_t** lock,
         block_header = (zilog_block_header_t*)(log_buf->buf + ZILOG_CAST_OFFSET(write_offset));
 
         if(write_secquence_unm_expected != block_header->write_sequence_num){
+            //return NULL;
             syscall(SYS_sched_yield);
             /*It is a new block which was allocated by other thread.*/
             /*SynchronizationcPoint 1: Wait here until all content are completely written into this block.*/
@@ -450,11 +522,14 @@ static uint8_t* get_space_from_log_buffer(volatile size_t** lock,
         }
 
         if (required_space_size > free_space_size) {
-            while(write_offset + free_space_size + sizeof(zilog_block_header_t) + required_space_size
-                    - log_buf->read_offset > ZILOG_MAX_BUFFER_WR_GAP){
+            size_t write_offset_updated = write_offset + free_space_size + sizeof(zilog_block_header_t) + required_space_size;
+            if(drop_threshold &&  (write_offset_updated > drop_threshold + log_buf->read_offset)){
+                /*drop*/
+                printf("drop priority: %d\t", priority);
                 return NULL;
-                syscall(SYS_sched_yield);
             }
+            /*Wait until buffer frees.*/
+            SLEEP_TO_WAIT(write_offset_updated > ZILOG_MAX_BUFFER_WR_GAP + log_buf->read_offset);
             if(free_space_size >= sizeof(zilog_content_header_t))
                 /*Need to set a ending flag in the last content header, so the block must be locked to notify reader the content is not ready yet.*/
                 ZILOG_LOCK_BLOCK(&block_header->lock);
@@ -480,15 +555,14 @@ static uint8_t* get_space_from_log_buffer(volatile size_t** lock,
             size_t write_offset_updated;
             buf = log_buf->buf + ZILOG_BOUNDED_OFFSET(write_offset);
             write_offset_updated = write_offset + required_space_size;
-            //assert(write_offset - read_offset <= ZILOG_MAX_BUFFER_WR_GAP);
-            if(write_offset_updated - read_offset > ZILOG_MAX_BUFFER_WR_GAP){
-                /*Issue 1, to do, important log (ERROR, WARNING) should be kept and drops non-important (INFO,DEBUG) logs.*/
-                /*Memory is full and do not write any log, just return. This drops new logs to write.*/
+
+            if(drop_threshold && (write_offset_updated > drop_threshold + log_buf->read_offset)){
+                /*drop*/
+                printf("drop priority: %d\t", priority);
                 return NULL;
-                /*Wait log agent to read old logs, this keeps all logs but whole process waits free space after some logs are read.*/
-                syscall(SYS_sched_yield);
-                continue;
             }
+            /*SynchronizationcPoint 1: Wait here until all content has been completely written into this block.*/
+            SLEEP_TO_WAIT(write_offset_updated > ZILOG_MAX_BUFFER_WR_GAP + log_buf->read_offset);
             ZILOG_LOCK_BLOCK(&block_header->lock);
             if(__sync_bool_compare_and_swap(&log_buf->write_offset, write_offset, write_offset_updated)){
                 *lock = &block_header->lock;
@@ -516,22 +590,29 @@ static uint8_t* get_space_from_log_buffer(volatile size_t** lock,
  * 3 Write arguments to the allocated space.
  * */
 /*1st call to start writing content, and a content header should be there in the beginning of the buffer.*/
-int zilog_write_arguments(zilog_unit_t* lunit, const char* __restrict fmt, ...) {
+int zilog_write_arguments(zilog_priority_t priority, zilog_unit_t* lunit, const char* __restrict fmt, ...) {
     zilog_content_header_t* content_header;
     zilog_buf_t* log_buf = &lbuf;
     va_list_inf_t va_list_inf;
     volatile size_t* lock;
     va_list args;
     va_start(args, fmt);
-    uint8_t* buf = get_space_from_log_buffer(&lock, &va_list_inf, lunit, args, log_buf);
+    uint8_t* buf = get_space_from_log_buffer(priority, &lock, &va_list_inf, lunit, args, log_buf);
     if(buf == NULL)
         return 1;
 
     content_header = (zilog_content_header_t*)buf;
+#if ZILOG_CONFIG_PACKED
+    write_args_packed(content_header,
+            buf + sizeof(zilog_content_header_t),
+            &va_list_inf,
+            lunit, args);
+#else
     write_args(content_header,
             buf + sizeof(zilog_content_header_t),
             &va_list_inf,
             lunit, args);
+#endif
     assert( ZILOG_CAST_OFFSET(buf - log_buf->buf) == ZILOG_CAST_OFFSET( (buf - log_buf->buf) + content_header->size));
     ZILOG_UNLOCK_BLOCK(lock);
     va_end(args);
@@ -653,7 +734,7 @@ static uint16_t get_arguments_size_by_type(zilog_unit_t* lunit, int type, uint8_
 #endif
 #ifdef __x86_64__
         /*Strings are copied in the end of the content buffer, so the size is 0 to save memory space.*/
-        size = sizeof(const char*);
+        size = 0;//sizeof(const char*);
 #else
         size = sizeof(const char*);
 #endif
@@ -681,9 +762,11 @@ static uint16_t get_arguments_size_by_type(zilog_unit_t* lunit, int type, uint8_
 
 static uint16_t calculate_arguments_total_size(zilog_unit_t* lunit, int* arg_type) {
     uint16_t total_size = 0;
+    uint16_t packed_size = 0;
 #ifdef __x86_64__
     uint8_t non_float_num = 0;
     uint8_t float_num = 0;
+    uint8_t n_str = 0;
 #endif
     int i;
     if(lunit->n_arg){
@@ -696,12 +779,12 @@ static uint16_t calculate_arguments_total_size(zilog_unit_t* lunit, int* arg_typ
                 total_size = ZILOG_ALIGN(total_size, size);
             if(ZILOG_STRING == lunit->arg_type[i]){
 #ifdef __x86_64__
-                lunit->non_float_before_str[lunit->n_str] = non_float_num;
-                lunit->float_before_str[lunit->n_str] = float_num;
+                lunit->non_float_before_str[n_str] = non_float_num;
+                lunit->float_before_str[n_str] = float_num;
 #else
-                lunit->str_off[lunit->n_str] = total_size;
+                lunit->str_off[n_str] = total_size;
 #endif
-                lunit->n_str++;
+                n_str++;
             }
 #ifdef __x86_64__
             if( ZILOG_DOUBLE != lunit->arg_type[i] &&
@@ -713,9 +796,12 @@ static uint16_t calculate_arguments_total_size(zilog_unit_t* lunit, int* arg_typ
 #endif
             /*It is an aligned size.*/
             total_size += size;
+            packed_size += size;
         }
     }
+    lunit->n_str = n_str;
     lunit->arg_total_size = total_size;
+    lunit->arg_packed_size = packed_size;
     assert(total_size < 256);
     return total_size;
 }
@@ -726,7 +812,15 @@ void initialize_zilog_unit(zilog_unit_t* lunit, const char* __restrict file,
     va_start(args, fmt);
     static size_t base_id = 0;
     int arg_type[ZILOG_MAX_ARG_NUM];
-    lunit->format_str = fmt;
+    size_t first_access;
+
+    first_access = __sync_fetch_and_add((size_t*)&lunit->format_str, 1);
+    if(first_access != 0){
+        /*Wait until another thread initialized 'lunit'.*/
+        while(lunit->format_str != fmt);
+        return;
+    }
+
     lunit->id = __sync_fetch_and_add(&base_id, 1);
     if (lunit->id == 0) {
         /*Initialize the log library as this is the first call of it.*/
@@ -747,4 +841,5 @@ void initialize_zilog_unit(zilog_unit_t* lunit, const char* __restrict file,
     lunit->n_str = 0;
 #endif
     calculate_arguments_total_size(lunit, arg_type);
+    lunit->format_str = fmt;
 }
