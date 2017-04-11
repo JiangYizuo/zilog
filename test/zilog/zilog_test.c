@@ -83,7 +83,7 @@ void test_zilog_with_string()
     //CALLGRIND_STOP_INSTRUMENTATION;
 }
 
-void* loop_logging(void* tid){
+void* loop_logging(){
     const char* str = "void";
     float fv = 0.1;
     double dv = 0.2312;
@@ -91,7 +91,8 @@ void* loop_logging(void* tid){
     struct timeval t0, t1, td;
     int64_t td_usec;
     gettimeofday(&t0, 0);
-
+    static size_t g_thread_id = 0;
+    size_t local_tid = __sync_fetch_and_add(&g_thread_id, 1);
     while(1){
         int64_t i;
 
@@ -115,7 +116,7 @@ void* loop_logging(void* tid){
             gettimeofday(&t1, 0);
             td_usec = timeval_subtract(&td, &t0, &t1);
             t0 = t1;
-            printf("thread id: %d ------ logs per second: %0.0f\n", (int)tid, (float)((FATAL_LOOP + ERROR_LOOP + WARN_LOOP + INFO_LOOP + DEBUG_LOOP) * PRINT_CIRCLE)*1000000/(float)td_usec);
+            printf("thread id: %ld ------ logs per second: %0.0f\n", local_tid, (float)((FATAL_LOOP + ERROR_LOOP + WARN_LOOP + INFO_LOOP + DEBUG_LOOP) * PRINT_CIRCLE)*1000000/(float)td_usec);
             loop_cnt = 1;
         }else
             loop_cnt++;
@@ -132,7 +133,7 @@ int main(int argc, char* argv[])
     COMPARE_COST(test_sprintf_with_string(), test_zilog_with_string());
     COMPARE_COST(test_sprintf_without_string(), test_zilog_without_string());
     for(i=0;i<THREAD_NUM;i++){
-        pthread_create(&pthread[i], NULL, loop_logging, (void*)i);
+        pthread_create(&pthread[i], NULL, loop_logging, NULL);
         usleep(CIRCLE*100/THREAD_NUM);
     }
 
