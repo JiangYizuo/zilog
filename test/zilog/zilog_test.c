@@ -18,13 +18,13 @@
 
 #define THREAD_NUM 8
 
-#define CIRCLE 250000
+#define CIRCLE 2500
 #define FATAL_LOOP 1
 #define ERROR_LOOP 2
 #define WARN_LOOP 4
 #define INFO_LOOP 16
 #define DEBUG_LOOP 256
-#define PRINT_CIRCLE 10
+#define PRINT_CIRCLE 1000
 
 
 void test_sprintf_without_string()
@@ -132,9 +132,10 @@ int main(int argc, char* argv[])
     printf("Start to test time efficiency comparing with the std 'sprintf' method.\n");
     COMPARE_COST(test_sprintf_with_string(), test_zilog_with_string());
     COMPARE_COST(test_sprintf_without_string(), test_zilog_without_string());
+    printf("Start stability test.\n");
     for(i=0;i<THREAD_NUM;i++){
         pthread_create(&pthread[i], NULL, loop_logging, NULL);
-        usleep(CIRCLE*100/THREAD_NUM);
+        usleep(CIRCLE*PRINT_CIRCLE/THREAD_NUM);
     }
 
     for(i=0;i<THREAD_NUM;i++)
