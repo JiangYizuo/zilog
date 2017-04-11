@@ -167,6 +167,28 @@ static uint16_t calculate_arg_list_string_offset_x86_64(
     return total_str_len;
 }
 
+static size_t calculate_required_sapce(
+        va_list_inf_t* va_list_inf,
+        zilog_unit_t* lunit, va_list args){
+    size_t req_size;
+    uint16_t str_size = 0;
+    size_t packed_size;
+    req_size = calculate_arg_list_size_x86_64(va_list_inf, lunit, args);
+    if(lunit->n_str > 0){
+        str_size = calculate_arg_list_string_offset_x86_64(va_list_inf, lunit, args);
+        req_size += str_size;
+    }
+    req_size += sizeof(zilog_content_header_t);
+    req_size = ZILOG_ALIGN(req_size, sizeof(size_t));
+    va_list_inf->size = req_size;
+    packed_size = lunit->arg_packed_size + str_size;
+    packed_size = ZILOG_ALIGN(packed_size, sizeof(size_t));
+    va_list_inf->packed_size = packed_size + sizeof(zilog_content_header_t);
+    return req_size;
+}
+
+#if !ZILOG_CONFIG_PACKED
+
 static void local_memcpy(uint64_t* dst, uint64_t* src, uint16_t len){
     while(len >= 64)
     {
@@ -239,35 +261,15 @@ static void local_memcpy_fp(uint64_t* dst, uint64_t* src, uint16_t len){
     }
 }
 
-static size_t calculate_required_sapce(
-        va_list_inf_t* va_list_inf,
-        zilog_unit_t* lunit, va_list args){
-    size_t req_size;
-    uint16_t str_size = 0;
-    size_t packed_size;
-    req_size = calculate_arg_list_size_x86_64(va_list_inf, lunit, args);
-    if(lunit->n_str > 0){
-        str_size = calculate_arg_list_string_offset_x86_64(va_list_inf, lunit, args);
-        req_size += str_size;
-    }
-    req_size += sizeof(zilog_content_header_t);
-    req_size = ZILOG_ALIGN(req_size, sizeof(size_t));
-    va_list_inf->size = req_size;
-    packed_size = lunit->arg_packed_size + str_size;
-    packed_size = ZILOG_ALIGN(packed_size, sizeof(size_t));
-    va_list_inf->packed_size = packed_size + sizeof(zilog_content_header_t);
-    return req_size;
-}
-
 static size_t write_args(zilog_content_header_t* content_header, uint8_t* buf, va_list_inf_t* va_list_inf,
         zilog_unit_t* lunit, va_list args) {
 
     size_t offset;
-#if !ZILOG_CONFIG_PACKED
+
     content_header->gp_off = va_list_inf->gp_off;
     content_header->gp_size = va_list_inf->gp_size;
     content_header->reg_size = va_list_inf->reg_size;
-#endif
+
     content_header->size = va_list_inf->size;
     content_header->lunit = lunit;
     //content_header->__jiffies = *jiffies;
@@ -300,6 +302,7 @@ static size_t write_args(zilog_content_header_t* content_header, uint8_t* buf, v
     return offset;
 }
 
+#else
 static size_t write_args_packed(zilog_content_header_t* content_header, uint8_t* buf, va_list_inf_t* va_list_inf,
         zilog_unit_t* lunit, va_list args) {
 
@@ -376,7 +379,7 @@ static size_t write_args_packed(zilog_content_header_t* content_header, uint8_t*
     return total_size;
 #undef ZILOG_WRITE_ARG
 }
-
+#endif
 
 #else
 

@@ -23,28 +23,36 @@ static int read_content_in_block(zilog_buf_t *lbuf, zilog_block_header_t* block,
     va_list args;
     va_start(args, read_window_size);
 
-    char fbuf[10240];
+
     /*Wait for completed contents, lock indicates some contents are not completely written yet.*/
     SLEEP_TO_WAIT(block->lock > 0);
-#if 0
+#if 1
     while(read_window_size){
         zilog_content_header_t *content_header = (zilog_content_header_t*)(lbuf->buf + ZILOG_BOUNDED_OFFSET(read_offset));
-        uint8_t* buf;
+
         if(content_header->size == 0 || read_window_size < sizeof(zilog_content_header_t))
             break;
-        buf = lbuf->buf + ZILOG_BOUNDED_OFFSET(read_offset) + sizeof(zilog_content_header_t);
+
+#if !ZILOG_CONFIG_PACKED
+        if(1)
+        {
+            char fbuf[10240];
+            uint8_t* buf;
+            buf = lbuf->buf + ZILOG_BOUNDED_OFFSET(read_offset) + sizeof(zilog_content_header_t);
+            args->fp_offset = content_header->gp_size + content_header->gp_off;
+            args->gp_offset = content_header->gp_off;
+            args->reg_save_area = buf - content_header->gp_off;
+            args->overflow_arg_area = buf + content_header->reg_size;
+            /*Just verify if the content is malformed.*/
+            vsnprintf(fbuf, 10240, ((zilog_unit_t*)content_header->lunit)->format_str, args);
+            //usleep(100);
+            //printf("%s", fbuf);
+            //syslog(LOG_INFO, "%s", fbuf);
+        }
+#endif
         assert(read_window_size >= content_header->size);
         read_window_size -= content_header->size;
         read_offset += content_header->size;
-        args->fp_offset = content_header->gp_size + content_header->gp_off;
-        args->gp_offset = content_header->gp_off;
-        args->reg_save_area = buf - content_header->gp_off;
-        args->overflow_arg_area = buf + content_header->reg_size;
-        /*Just verify if the content is malformed.*/
-        vsnprintf(fbuf, 10240, ((zilog_unit_t*)content_header->lunit)->format_str, args);
-        //usleep(100);
-        //printf("%s", fbuf);
-        //syslog(LOG_INFO, "%s", fbuf);
     }
 #endif
     va_end(args);
