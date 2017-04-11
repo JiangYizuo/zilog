@@ -7,100 +7,134 @@
 //#include <valgrind/callgrind.h>
 #include "../libpete/libpete.h"
 #include <syslog.h>
+#include <pthread.h>
 
 #include "../../src/zilog/zilog.h"
-#define LOOP_ROUNDS 1000000
-void test_logging_without_string()
+
+
+#define EFFICIENCY_TEST_LOOP_ROUNDS 1000000
+
+
+
+#define THREAD_NUM 8
+
+#define CIRCLE 250000
+#define FATAL_LOOP 1
+#define ERROR_LOOP 2
+#define WARN_LOOP 4
+#define INFO_LOOP 16
+#define DEBUG_LOOP 256
+#define PRINT_CIRCLE 10
+
+
+void test_sprintf_without_string()
 {
     const char* str = "void";
     int i;
     char fbuf[256];
     float fv = 0.1;
     double dv = 0.2312;
-    for(i=0;i<LOOP_ROUNDS;i++){
+    for(i=0;i<EFFICIENCY_TEST_LOOP_ROUNDS;i++){
         sprintf(fbuf, "%s, %s, %d, This is a test of high performance logging, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld\n",
                 __FILE__, __FUNCTION__, __LINE__, (short)-1, 'a', (int)2, str, fv, dv, -7L, 8LL);
         //syslog(LOG_INFO, "%s", fbuf);
     }
 }
 
-void test_logging_with_string()
+void test_sprintf_with_string()
 {
     const char* str = "void";
     int i;
     char fbuf[256];
     float fv = 0.1;
     double dv = 0.2312;
-    for(i=0;i<LOOP_ROUNDS;i++){
+    for(i=0;i<EFFICIENCY_TEST_LOOP_ROUNDS;i++){
         sprintf(fbuf, "%s, %s, %d, This is a test of high performance logging, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld, %s, %s\n",
                 __FILE__, __FUNCTION__, __LINE__, (short)-1, 'a', (int)2, str, fv, dv, -7L, 8LL, "first", "second");
         //syslog(LOG_INFO, "%s", fbuf);
     }
 }
 
-void test_hp_logging_without_string()
+void test_zilog_without_string()
 {
     const char* str = "void";
     int i;
     float fv = 0.1;
     double dv = 0.2312;
     //CALLGRIND_START_INSTRUMENTATION;
-    HP_LOGGING(1,1, "%d, %d, %s", 1, 2, "test");
-    for(i=0;i<LOOP_ROUNDS;i++){
-        //HP_LOGGING(1, 1, "This is a test of high performance logging, %hu, %p, %c, %s, %s, %s, %d, %d\n", (short)1, str, 'a', "first", "second", "third", 2, 3);
-        HP_LOGGING(1, 1, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld\n",
+    for(i=0;i<EFFICIENCY_TEST_LOOP_ROUNDS;i++){
+        ZILOG(1, ZILOG_PRIORITY_FATAL, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld\n",
                 -1, (short)-1, 'a', (int)2, str, fv, dv, -7L, 8LL);
     }
     //CALLGRIND_STOP_INSTRUMENTATION;
 }
 
-void test_hp_logging_with_string()
+void test_zilog_with_string()
 {
     const char* str = "void";
     int i;
     float fv = 0.1;
     double dv = 0.2312;
     //CALLGRIND_START_INSTRUMENTATION;
-    //HP_LOGGING(1,1, "%d, %f, %s", 1, 0.2, "test");
-    for(i=0;i<LOOP_ROUNDS;i++){
-        //HP_LOGGING(1, 1, "This is a test of high performance logging, %hu, %p, %c, %s, %s, %s, %d, %d\n", (short)1, str, 'a', "first", "second", "third", 2, 3);
-        HP_LOGGING(1, 1, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld, %s, %s\n",
+    for(i=0;i<EFFICIENCY_TEST_LOOP_ROUNDS;i++){
+        ZILOG(1, ZILOG_PRIORITY_FATAL, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld, %s, %s\n",
                 -1, (short)-1, 'a', (int)2, str, fv, dv, -7L, 8LL, "first", "second");
     }
     //CALLGRIND_STOP_INSTRUMENTATION;
 }
 
-void* loop_logging(void* arg){
+void* loop_logging(void* tid){
     const char* str = "void";
     float fv = 0.1;
     double dv = 0.2312;
+    int64_t loop_cnt = 1;
+    struct timeval t0, t1, td;
+    int64_t td_usec;
+    gettimeofday(&t0, 0);
+
     while(1){
-        HP_LOGGING(1,1, "%d, %f, %s\n", 1, 0.2, "test");
-        HP_LOGGING(1, 1, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld\n",
+        int64_t i;
+
+        for (i = 0; i<FATAL_LOOP; i++)
+            ZILOG(1, ZILOG_PRIORITY_FATAL, "%d, %f, %s\n", 1, 0.2, "test");
+        for (i = 0; i<ERROR_LOOP; i++)
+            ZILOG(1, ZILOG_PRIORITY_ERROR, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld\n",
                                -1, (short)-1, 'a', (int)2, str, fv, dv, -7L, 8LL);
-        HP_LOGGING(1,1, "%d, %f, %s\n", 1, 0.2, "test");
-        HP_LOGGING(1, 1, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld, %s, %s\n",
-                       -1, (short)-1, 'a', (int)2, str, fv, dv, -7L, 8LL, "first", "second");
-        HP_LOGGING(1, 1, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld, %s, %s\n",
-                               -1, (short)-1, 'a', (int)2, str, fv, dv, -7L, 8LL, "first", "second");
-        HP_LOGGING(1, 1, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld, %s, %s\n",
-                               -1, (short)-1, 'a', (int)2, str, fv, dv, -7L, 8LL, "first", "second");
+        for (i = 0; i<WARN_LOOP; i++)
+            ZILOG(1, ZILOG_PRIORITY_WARN, "%d, %f, %s\n", 1, 0.2, "test");
+        for (i = 0; i<INFO_LOOP; i++)
+            ZILOG(1, ZILOG_PRIORITY_INFO, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld, %s, %s\n",
+                       1, (short)-1, 'a', (int)2, str, fv, dv, -7L, 8LL, "first", "second");
+        for (i = 0; i<DEBUG_LOOP; i++){
+            ZILOG(1, ZILOG_PRIORITY_DEBUG, "This is a test of high performance logging, %x, %hu, %c, %d, %p, %3.3f, %5.5f, %ld, %lld, %s, %s\n",
+                               1, (short)-1, 'a', (int)2, str, fv, dv, -7L, 8LL, "first", "second");
+        }
+        if(CIRCLE > 0)
+            usleep(CIRCLE);
+        if(loop_cnt == PRINT_CIRCLE){
+            gettimeofday(&t1, 0);
+            td_usec = timeval_subtract(&td, &t0, &t1);
+            t0 = t1;
+            printf("thread id: %d ------ logs per second: %0.0f\n", (int)tid, (float)((FATAL_LOOP + ERROR_LOOP + WARN_LOOP + INFO_LOOP + DEBUG_LOOP) * PRINT_CIRCLE)*1000000/(float)td_usec);
+            loop_cnt = 1;
+        }else
+            loop_cnt++;
     }
     return NULL;
 }
-#define THREAD_NUM 8
 
-#include <pthread.h>
 int main(int argc, char* argv[])
 {
     pthread_t pthread[THREAD_NUM];
 
     int i;
-    HP_LOGGING(1,1, "%d, %f, %s\n", 1, 0.2, "test");
-    COMPARE_COST(test_logging_with_string(), test_hp_logging_with_string());
-    COMPARE_COST(test_logging_without_string(), test_hp_logging_without_string());
-    for(i=0;i<THREAD_NUM;i++)
-        pthread_create(&pthread[i], NULL, loop_logging, NULL);
+    printf("Start to test time efficiency comparing with the std 'sprintf' method.\n");
+    COMPARE_COST(test_sprintf_with_string(), test_zilog_with_string());
+    COMPARE_COST(test_sprintf_without_string(), test_zilog_without_string());
+    for(i=0;i<THREAD_NUM;i++){
+        pthread_create(&pthread[i], NULL, loop_logging, (void*)i);
+        usleep(CIRCLE*100/THREAD_NUM);
+    }
 
     for(i=0;i<THREAD_NUM;i++)
         pthread_join(pthread[i], NULL);
