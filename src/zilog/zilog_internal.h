@@ -10,6 +10,9 @@
 #include<stdint.h>
 #include "zilog_time.h"
 
+#define likely(x)  __builtin_expect(!!(x), 1)
+#define unlikely(x)    __builtin_expect(!!(x), 0)
+
 #define ZILOG_CONFIG_PACKED 1
 //#define ZILOG_INTERNAL_DEBUG printf
 #define ZILOG_INTERNAL_DEBUG(...)
@@ -19,7 +22,7 @@
 
 #define ZILOG_THREAD_BUFFER_BLOCK_LOAD_SIZE  \
     ( ZILOG_THREAD_BUFFER_BLOCK_SIZE - sizeof(zilog_block_header_t) )
-#define ZILOG_THREAD_BUFFER_BLOCK_NUM 128 /*At least 32.*/
+#define ZILOG_THREAD_BUFFER_BLOCK_NUM (128) /*At least 32.*/
 #define ZILOG_THREAD_BUFFER_SIZE (ZILOG_THREAD_BUFFER_BLOCK_SIZE*ZILOG_THREAD_BUFFER_BLOCK_NUM)
 #define ZILOG_MAX_BUFFER_WR_GAP (ZILOG_THREAD_BUFFER_BLOCK_SIZE*(ZILOG_THREAD_BUFFER_BLOCK_NUM - 0))
 #define ZILOG_BOUNDED_OFFSET(__offset) ((__offset) & (ZILOG_THREAD_BUFFER_SIZE - 1))

@@ -83,8 +83,6 @@ static int read_content_from_log_buffer(zilog_buf_t *lbuf)
             read_offset += sizeof(zilog_block_header_t);
         }
 
-        //if(ZILOG_SEQUENCE_NUM(write_offset) == ZILOG_SEQUENCE_NUM(read_offset))
-
         if(write_offset > read_offset)
         {
             read_window_size = write_offset - read_offset;

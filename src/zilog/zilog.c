@@ -524,11 +524,11 @@ static uint8_t* get_space_from_log_buffer(zilog_priority_t priority, volatile si
             continue;
         }
 
-        if (required_space_size > free_space_size) {
+        if (unlikely(required_space_size > free_space_size)) {
             size_t write_offset_updated = write_offset + free_space_size + sizeof(zilog_block_header_t) + required_space_size;
             if(drop_threshold &&  (write_offset_updated > drop_threshold + log_buf->read_offset)){
                 /*drop*/
-                printf("drop priority: %d\t", priority);
+                //printf("drop priority: %d\t", priority);
                 return NULL;
             }
             /*Wait until buffer frees.*/
@@ -561,7 +561,7 @@ static uint8_t* get_space_from_log_buffer(zilog_priority_t priority, volatile si
 
             if(drop_threshold && (write_offset_updated > drop_threshold + log_buf->read_offset)){
                 /*drop*/
-                printf("drop priority: %d\t", priority);
+                //printf("drop priority: %d\t", priority);
                 return NULL;
             }
             /*SynchronizationcPoint 1: Wait here until all content has been completely written into this block.*/
@@ -805,11 +805,10 @@ static uint16_t calculate_arguments_total_size(zilog_unit_t* lunit, int* arg_typ
     lunit->n_str = n_str;
     lunit->arg_total_size = total_size;
     lunit->arg_packed_size = packed_size;
-    assert(total_size < 256);
     return total_size;
 }
 
-void initialize_zilog_unit(zilog_unit_t* lunit, const char* __restrict file,
+void zilog_initialize_log_unit(zilog_unit_t* lunit, const char* __restrict file,
         const char* __restrict fun, int line, const char* __restrict fmt, ...) {
     va_list args;
     va_start(args, fmt);

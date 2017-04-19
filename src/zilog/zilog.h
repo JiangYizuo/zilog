@@ -83,7 +83,7 @@ typedef struct{
 #define LL_PRINT(__FMT, __ARG)
 
 extern int zilog_debugLevels[ZILOG_MAX_SESSION_NUM];
-void initialize_zilog_unit(zilog_unit_t* lunit, const char* file, const char* fun, int line, const char* fmt, ...);
+void zilog_initialize_log_unit(zilog_unit_t* lunit, const char* file, const char* fun, int line, const char* fmt, ...);
 int zilog_write_arguments(
         zilog_priority_t priority,
 		zilog_unit_t* lunit,
@@ -92,14 +92,14 @@ int zilog_write_arguments(
 		)__attribute__((format(printf,3,4)));
 
 
-#define do_debug(__SECTION, __LEVEL) \
+#define zilog_do_debug(__SECTION, __LEVEL) \
     ((__LEVEL) <= zilog_debugLevels[__SECTION])
 
 #define DO_PRINTF(...) \
     do{ \
         static zilog_unit_t lunit = {NULL}; \
         if(lunit.format_str == NULL) \
-            initialize_zilog_unit(&lunit, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__); \
+            zilog_initialize_log_unit(&lunit, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__); \
         zilog_write_arguments(&lunit, __VA_ARGS__);\
     }while(0)
 
@@ -107,9 +107,9 @@ int zilog_write_arguments(
     do{ \
         static zilog_unit_t lunit = {NULL}; \
         if(lunit.format_str == NULL) {\
-            initialize_zilog_unit(&lunit, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__); \
+            zilog_initialize_log_unit(&lunit, __FILE__, __FUNCTION__, __LINE__, __VA_ARGS__); \
         }\
-        if(do_debug(__SESSION, __LEVEL)){ \
+        if(zilog_do_debug(__SESSION, __LEVEL)){ \
             zilog_write_arguments(__LEVEL, &lunit, __VA_ARGS__);\
         }\
     }while(0)
